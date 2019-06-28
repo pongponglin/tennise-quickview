@@ -1,0 +1,131 @@
+---
+title: 'Tennis: winner v.s ranking'
+author: "Nicole lin"
+date: "Update : `r format(Sys.time(), '%Y / %m / %d - %H:%M')`"
+output:
+  rmdformats::readthedown:
+     code_folding: hide
+     number_sections: FALSE
+     toc_float: 
+      collapsed: FALSE
+     toc_depth: 4
+---
+
+```{r setup, include=FALSE}
+library(stringr)
+library(dplyr)
+library(tidyr)
+library(magrittr)
+library(knitr)
+library(DT)
+library(kableExtra)
+library(ggplot2)
+library(highcharter)
+knitr::opts_chunk$set(echo=TRUE,
+                       cache=TRUE,
+                       prompt=FALSE,
+                       tidy=TRUE,
+                       comment=NA,
+                       message=FALSE,
+                       warning=FALSE,
+                      fig.align = 'center')
+
+```
+
+```{r read file}
+atp_m2015 <- read.csv("https://raw.githubusercontent.com/JeffSackmann/tennis_atp/master/atp_matches_2015.csv",
+                      stringsAsFactors = FALSE)
+atp_m2016 <- read.csv("https://raw.githubusercontent.com/JeffSackmann/tennis_atp/master/atp_matches_2016.csv",
+                      stringsAsFactors = FALSE)
+atp_m2017 <- read.csv("https://raw.githubusercontent.com/JeffSackmann/tennis_atp/master/atp_matches_2017.csv",
+                      stringsAsFactors = FALSE)
+atp_m2018 <- read.csv("https://raw.githubusercontent.com/JeffSackmann/tennis_atp/master/atp_matches_2018.csv",
+                      stringsAsFactors = FALSE)
+```
+
+**高排名的人勝率就 >0.5？**
+
+**是不是用排名來看就可以有很高的機率預測誰會贏**
+
+取2015~2018年的資料，在winner 與 loser 都有排名的比賽中，看不同排名差距下，高排名的人獲勝的機率
+
+```{r}
+atp_m2015 %>% filter(!is.na(winner_rank) & !is.na(loser_rank)) %>% mutate(year="2015") %>% 
+  rbind(filter(atp_m2016,!is.na(winner_rank) & !is.na(loser_rank)) %>% mutate(year="2016")) %>% 
+  rbind(filter(atp_m2017,!is.na(winner_rank) & !is.na(loser_rank)) %>% mutate(year="2017")) %>% 
+  rbind(filter(atp_m2018,!is.na(winner_rank) & !is.na(loser_rank)) %>% mutate(year="2018")) %>% 
+  mutate(rank_diff = abs(winner_rank-loser_rank),
+         high_win = ifelse(winner_rank<loser_rank,1,0)) -> atp
+
+group_by(atp,year) %>% summarise(n=n()) %>% 
+  knitr::kable("html", align = "c") %>% 
+  kable_styling("striped")
+```
+
+
+## diffrerence of ranking v.s probability of winning
+差距在100內比較看得出趨勢
+
+```{r}
+atp %>% group_by(rank_diff) %>% 
+  summarise(total_win=sum(high_win),prob=mean(high_win),n=n()) %>% 
+  ggplot(aes(x=rank_diff, y=prob)) +
+  geom_point() 
+
+atp %>% group_by(rank_diff) %>% 
+  summarise(total_win=sum(high_win),prob=mean(high_win),n=n()) %>% 
+  filter(rank_diff<=100) %>%
+  ggplot(aes(x=rank_diff, y=prob)) +
+  geom_point() +
+  ggtitle("Diff_rank < 100") +
+  geom_smooth(method=lm) 
+```
+
+<br>
+
+### 四年的資料依據 rank_diff 切 20 個quantile 
+```{r}
+atp %>% 
+  mutate(group = cut(rank_diff,breaks=quantile(c(0,rank_diff),probs = seq(0,1,0.05)), labels=c(1:20))) %>% 
+  group_by(group) %>% 
+  summarise(total_win=sum(high_win),prob=mean(high_win),n=n()) %>% 
+  ggplot(aes(x=group, y=prob)) +
+  geom_point() +
+  ggtitle("All") + 
+  ylim(0.45, 0.85) 
+```
+
+<br>
+
+### 各年度 10 個 quantile
+```{r}
+atp %>% group_by(year) %>%
+  mutate(y_group = cut(rank_diff,breaks=quantile(c(0,rank_diff),probs = seq(0,1,0.1)), labels=c(1:10))) %>% 
+  group_by(year,y_group) %>% 
+  summarise(total_win=sum(high_win),prob=mean(high_win),n=n()) %>% 
+  hchart("line", hcaes(x = y_group, y = prob, group = year))
+```
+
+------
+
+## Surface
+```{r}
+group_by(atp,year,surface) %>% summarise(n=n()) %>% 
+  spread(surface, n) -> tmp
+tmp[5,] <- c("total",apply(tmp[,-1], 2, sum,na.rm=T))
+tmp %>% 
+  knitr::kable("html", align = "c") %>% 
+  kable_styling("striped")
+```
+
+### 在不同場地上是否有差異
+```{r}
+atp %>% filter(surface%in%c("Hard","Grass","Clay")) %>% 
+  group_by(surface) %>% 
+  mutate(m_group = cut(rank_diff,breaks=quantile(c(0,rank_diff),probs = seq(0,1,0.1)), labels=c(1:10))) %>% 
+  group_by(surface,m_group) %>% 
+  summarise(total_win=sum(high_win),prob=mean(high_win),n=n()) %>% 
+  hchart("line", hcaes(x = m_group, y = prob, group = surface),color=c("#f36162","#5C954A","#495397"))
+
+```
+
